@@ -104,14 +104,13 @@ apt-get install  -y --no-install-recommends \
 && apt-get install --no-install-recommends libboost-all-dev
 
 WORKDIR $CAFFE_ROOT
-RUN echo $PATH && ls -al /usr/local/cuda && \
-    git clone -b master --depth 1 https://github.com/BVLC/caffe.git . && \
+RUN git clone -b master --depth 1 https://github.com/BVLC/caffe.git . && \
+    pip install --no-use-wheel scikit-image && \
     for req in $(cat python/requirements.txt) pydot; do pip install $req; done 
 
-RUN mkdir build && cd build && \
-  cmake .. && \
-  make -j"$(nproc)" all && \
-  make install
+RUN cp Makefile.config.example Makefile.config && \
+    echo CXXFLAGS += -std=c++11 >> Makefile.config && \   
+    make -j"$(nproc)" all 
 
 #RUN cp Makefile.config.example Makefile.config && \
 #    echo USE_CUDNN := 0 >> Makefile.config && \ 
@@ -124,8 +123,8 @@ ENV PATH $CAFFE_ROOT/build/tools:$PYCAFFE_ROOT:$PATH
 RUN echo "$CAFFE_ROOT/build/lib" >> /etc/ld.so.conf.d/caffe.conf && ldconfig
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
-#WORKDIR $CAFFE_ROOT
-#RUN make pycaffe
+WORKDIR $CAFFE_ROOT
+RUN make -j"$(nproc)" pycaffe
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libopencv-dev \
@@ -170,5 +169,5 @@ RUN git clone https://github.com/eldar/deepcut-cnn && \
 #######
 # END
 #######
-EXPOSE 8000 9000
+EXPOSE 8000 9000 8888
 CMD /bin/bash
