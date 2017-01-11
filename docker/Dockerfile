@@ -12,6 +12,8 @@ RUN pip install \
 ########
 # CUDA 8
 ########
+LABEL com.nvidia.volumes.needed="nvidia_driver"
+
 RUN NVIDIA_GPGKEY_SUM=d1be581509378368edeec8c1eb2958702feedf3bc3d17011adbf24efacce4ab5 && \
     NVIDIA_GPGKEY_FPR=ae09fe4bbd223a84b2ccfce3f60f4b3d7fa2af80 && \
     apt-key adv --fetch-keys http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1404/x86_64/7fa2af80.pub && \
@@ -32,7 +34,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         cuda-curand-$CUDA_PKG_VERSION \
         cuda-cusparse-$CUDA_PKG_VERSION \
         cuda-npp-$CUDA_PKG_VERSION \
-        cuda-cudart-$CUDA_PKG_VERSION && \
+        cuda-cudart-$CUDA_PKG_VERSION \
+	nvidia-367 && \
     ln -s cuda-$CUDA_VERSION /usr/local/cuda && \
     rm -rf /var/lib/apt/lists/*
 
