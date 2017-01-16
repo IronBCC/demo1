@@ -7,10 +7,6 @@ import os, sys, inspect
 def import_module(path):
     sys.path.insert(0, path)
 
-import openface
-#import pose
-
-
 import_module("deepcut-cnn/python")
 import_module("deepcut-cnn/python/pose")
 import_module("mxnet_ssd")
@@ -137,6 +133,9 @@ def parse_args():
                         help='show detection time')
     parser.add_argument('--classifierModel', dest='classifierModel', type=str, default="openface/models/openface/celeb-classifier.nn4.small2.v1.pkl",
                         help='show detection time')
+    parser.add_argument('--imgDim', dest='imgDim', type=int, default=96,
+                        help='show detection time')
+    parser.add_argument('--threshold', type=float, default=0.5)
     args = parser.parse_args()
     return args
 
@@ -168,6 +167,46 @@ def predict(filename, mod, synsets):
     prob = mod.get_outputs()[0].asnumpy()
     prob = np.squeeze(prob)
 
+# {
+#   "persons":{
+#     [
+#       {
+#         "id": 102039,
+#         "poseCoordinats":{},
+#         "pose": "standing, hand up",
+#         "emotions": "nervious",
+#         "secondsSinceAppearing": 2100
+#       },
+#       {
+#         "id": 10439,
+#         "poseCoordinats":{},
+#         "pose": "laying",
+#         "emotions": "neutral",
+#         "secondsSinceAppearing": 2100
+#       },
+#     ]
+#   }
+# }
+
+###########
+# Pose
+###########
+# 0 - right foot
+# 1 - right knee
+# 2 - right hip
+# 3 - left hip
+# 4 - left knee
+# 5 - left foot
+# 6 - right palm
+# 7 - right elbow
+# 8 - right shoulder
+# 9 - left shoulder
+# 10 - left elbow
+# 11 - left palm
+# 12 - chin
+# 13 - forehead
+##############
+
 def _npcircle(image, cx, cy, radius, color, transparency=0.0):
     """Draw a circle on an image using only numpy methods."""
     radius = int(radius)
@@ -184,6 +223,10 @@ def resize(img, size):
     r = img.shape[0] / float(img.shape[1])
     size = (size[0], int(size[0] * r))
     return cv2.resize(img, size)
+
+def facecrop(img, pose):
+    return resize(img, (SSD_SHAPE_SIZE, SSD_SHAPE_SIZE))
+
 
 if __name__ == '__main__':
     args = parse_args()
@@ -207,11 +250,11 @@ if __name__ == '__main__':
     model_bin = 'deepcut-cnn/models/deepercut/ResNet-152.caffemodel'
     scales = '1.'
 
-    # align = openface.AlignDlib("openface/models/dlib/shape_predictor_68_face_landmarks.dat")
-    # net = openface.TorchNeuralNet(
-    #     "openface/models/openface/nn4.small2.v1.t7",
-    #     imgDim=96,
-    #     cuda=not args.cpu)
+    align = openface.AlignDlib("openface/models/dlib/shape_predictor_68_face_landmarks.dat")
+    net = openface.TorchNeuralNet(
+        "openface/models/openface/nn4.small2.v1.t7",
+        imgDim=args.imgDim,
+        cuda=False)
 
     cap = cv2.VideoCapture("test2.mp4")
     idx = 0
@@ -247,6 +290,9 @@ if __name__ == '__main__':
         last_pt1 = None
         last_pt2 = None
         last_cl = None
+
+        persons = []
+        person_id = 0;
         for det in dets:
             pt1, pt2, cl = extract_rect(det, img_origin_size.shape[1], img_origin_size.shape[0])
             if cl is None or \
@@ -254,7 +300,7 @@ if __name__ == '__main__':
                 continue
             if cl != "person" :
                 continue
-
+            person_id += 1
             print pt1, pt2, cl
             last_pt1 = pt1
             last_pt2 = pt2
@@ -264,18 +310,24 @@ if __name__ == '__main__':
             pose_start = time.clock()
             #crop person
             image = img_origin_size[pt1[1]:pt2[1], pt1[0]:pt2[0]]#cv2.resize(img_origin_size, (224, 224))
-
-            # classifier_webcam.infer(image, args, align, net)
-
             if image.ndim == 2:
                 image = np.dstack((image, image, image))
             else:
                 image = image[:, :, ::-1]
-            print(" pose progress ", image.shape)
-            pose = estimate_pose(image, model_def, model_bin, [1.])
 
+            pose = estimate_pose(image, model_def, model_bin, [1.])
             print("pose : ", (time.clock() - pose_start))
+
+            face_start = time.clock()
+            image_face = facecrop(image, pose)
+            reps, bb = classifier_webcam.getRep(image_face, args, align, net)
+            print reps, bb
+            for box in bb:
+                print box
+
+            print("face : ", (time.clock() - face_start))
             print("img_preprocessing : ", (time.clock() - start))
+
             start = time.clock()
 
             if args.visualize:
@@ -298,11 +350,15 @@ if __name__ == '__main__':
 
                 cv2.rectangle(img_origin_size, pt1, pt2, (255, 0, 0))
 
-            with open(person_deepcut_out_name, 'wb') as outfile:
-                json.dump(pose.tolist(), outfile)
+            persons.append({'person_id':person_id, 'poseCoordinats':pose.tolist()})
+
             cv2.imwrite(person_out_name + ".jpg", img_origin_size)
 
             print("visualize : ", (time.clock() - start))
+
+        with open(person_deepcut_out_name, 'wb') as outfile:
+            json.dump({'persons':persons}, outfile)
+
         idx += 1
         # time.sleep(1)
         # Display the resulting frame

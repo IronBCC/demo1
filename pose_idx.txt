@@ -1,0 +1,18 @@
+###########
+# Pose
+###########
+# 0 - right foot
+# 1 - right knee
+# 2 - right hip
+# 3 - left hip
+# 4 - left knee
+# 5 - left foot
+# 6 - right palm
+# 7 - right elbow
+# 8 - right shoulder
+# 9 - left shoulder
+# 10 - left elbow
+# 11 - left palm
+# 12 - chin
+# 13 - forehead
+##############
