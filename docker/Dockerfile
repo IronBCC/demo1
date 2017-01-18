@@ -205,6 +205,12 @@ RUN apt-get update && apt-get install -y zip && \
     unzip ngrok-stable-linux-amd64.zip && \
     mv ngrok /usr/bin
 
+RUN git clone http://ironbcc:GfhjkmYf@github.com/maxgoncharov/cherrylab-demobot.git && \
+    npm install body-parser config express request && \
+    npm install forever forever-monitor -g && \
+    npm install forever-monitor
+
+
 #######
 # END
 #######
