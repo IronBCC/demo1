@@ -41,7 +41,11 @@ import json
 import shutil
 import os
 
+import math
+
 import scipy
+
+import activity_detection
 
 from collections import namedtuple
 
@@ -142,7 +146,7 @@ def parse_args():
                         help='show detection time')
     parser.add_argument('--visualize', dest='visualize', type=bool, default=True,
                         help='show detection time')
-    parser.add_argument('--verbose', dest='verbose', type=bool, default=True,
+    parser.add_argument('--verbose', dest='verbose', type=bool, default=False,
                         help='show detection time')
     parser.add_argument('--classifierModel', dest='classifierModel', type=str, default="openface/models/openface/celeb-classifier.nn4.small2.v1.pkl",
                         help='show detection time')
@@ -276,6 +280,10 @@ def regFace(faceDet):
     FACES_DB.append(faceDet)
     return len(FACES_DB) - 1
 
+def increase_rect(pt1, pt2):
+    return (int(pt1[0] * 0.95), int(pt1[1] * 0.9)),\
+           (int(math.ceil(pt2[0] * 1.05)), int(math.ceil(pt2[0] * 1.05)))
+
 face_align = None
 face_net = None
 
@@ -316,7 +324,7 @@ def process_image(img_origin_size, idx):
         last_pt1 = pt1
         last_pt2 = pt2
         last_cl = cl
-        # TODO: path only people squeare
+        pt1, pt2 = increase_rect(pt1, pt2)
 
         pose_start = time.clock()
         # crop person
@@ -328,17 +336,25 @@ def process_image(img_origin_size, idx):
             person_image = person_image[:, :, ::-1]
 
         pose = estimate_pose(person_image, model_def, model_bin, [1.])
-        print("pose : ", (time.clock() - pose_start))
+        pose = activity_detection.filter(pose)
+        activity = activity_detection.detect(pose)
+        print("pose is {} : time = {} sec".format(activity, time.clock() - pose_start))
+
 
         face_start = time.clock()
         # image_face = face_rect(image, pose)
         image_face = resize(image_copy, (SSD_SHAPE_SIZE, SSD_SHAPE_SIZE))
-        reps, bb = classifier_webcam.getRep(image_face, args, face_align, face_net)
+        face_rep, face_bb = classifier_webcam.getRep(image_face, args, face_align, face_net)
         face_id = -1
-        if len(reps) > 0:
-            face_id = findFace(reps[0])
+        if len(face_rep) > 0:
+            face_rep = face_rep[0]
+            face_bb = face_bb[0]
+            face_id = findFace(face_rep)
             if face_id == -1:
-                face_id = regFace(reps[0])
+                face_id = regFace(face_rep)
+        else:
+            face_rep = None
+            face_bb = None
 
         print("face (", face_id, " : ", (time.clock() - face_start))
         print("img_preprocessing : ", (time.clock() - start))
@@ -365,7 +381,15 @@ def process_image(img_origin_size, idx):
 
             cv2.rectangle(img_origin_size, pt1, pt2, (255, 0, 0))
 
-        persons.append({'person_id': face_id, 'poseCoordinats': pose.tolist(), 'activity': 'standing'})
+        persons.append(
+            {'person_id': face_id,
+             'poseCoordinats': pose.tolist(),
+             'pose_bb' : (pt1, pt2),
+             'activity': activity,
+             'face_matrix': face_rep.tolist() if face_rep != None else None,
+             'face_bb' : ((face_bb.left(), face_bb.top()), (face_bb.right(),face_bb.bottom())) if face_bb != None else None
+             })
+
         print("visualize : ", (time.clock() - start))
 
     if len(persons) > 0:
@@ -402,6 +426,11 @@ if __name__ == '__main__':
         imgDim=args.imgDim,
         cuda=False)
 
+    # img = cv2.imread("pose_5.jpg")
+    # process_image(img, 5)
+#
+#
+# def blabla():
     cap = cv2.VideoCapture("test2.mp4")
     FLIP = True
     # cap = cv2.VideoCapture(0)
@@ -428,7 +457,7 @@ if __name__ == '__main__':
             print "Unable to read image"
             break
 
-        print "Readed {}".format(idx)
+        # print "Readed {}".format(idx)
         stream.on_next((img_origin_size, idx))
         # process_image(img_origin_size, idx)
         idx += 1
