@@ -4,6 +4,7 @@
 import os, sys, inspect
 # realpath() will make your script run, even if you symlink it :)
 
+
 def import_module(path):
     sys.path.insert(0, path)
 
@@ -46,6 +47,16 @@ from collections import namedtuple
 
 from mxnet.io import DataBatch
 
+import rx
+from rx import Observable
+from rx.subjects import Subject
+from rx.core import Scheduler
+
+def print_it(x):
+    print x
+
+
+
 CACHE_FOLDER = "cache/"
 
 Batch = namedtuple('Batch', ['data'])
@@ -63,6 +74,8 @@ CLASSES = ('aeroplane', 'bicycle', 'bird', 'boat',
 
 MAX_IMAGE_SIZE = 700
 SSD_SHAPE_SIZE = 300
+SKIP_RATE = 12
+
 
 def get_detector(net, prefix, epoch, data_shape, mean_pixels, ctx,
                  nms_thresh=0.5, force_nms=True):
@@ -224,8 +237,141 @@ def resize(img, size):
     size = (size[0], int(size[0] * r))
     return cv2.resize(img, size)
 
-def facecrop(img, pose):
-    return resize(img, (SSD_SHAPE_SIZE, SSD_SHAPE_SIZE))
+def face_rect(img, pose):
+    face = ((pose[0, 13], pose[1, 13]), (pose[0, 12], pose[1, 12]))
+    dt = face[1][1] - face[0][1]
+    # return ((face[0][1], face[0][0] - dt), (face[1][1] + dt, face[1][0] + dt))
+    return img[face[0][0] - dt:face[1][0] + dt, face[0][1]:face[1][1] + dt]
+    # return resize(img, (SSD_SHAPE_SIZE, SSD_SHAPE_SIZE))
+
+def pose_to_global(pose, person):
+    return pose
+
+def eval_face(img, face_bb):
+    start = time.clock()
+    alignedFace = align.align(args.imgDim, img, face_bb, landmarkIndices=openface.AlignDlib.OUTER_EYES_AND_NOSE)
+
+    if alignedFace is None:
+        raise Exception("Unable to align the frame")
+    if args.verbose:
+        print("Alignment took {} seconds.".format(time.time() - start))
+
+    return net.forward(alignedFace)
+
+FACES_DB = []
+FACE_TRESHOLD = 0.8
+
+FLIP = False
+
+def findFace(faceDet):
+    for i in range(len(FACES_DB)):
+        dt = np.subtract(FACES_DB[i], faceDet)
+        dt = np.dot(dt, dt)
+        if dt < FACE_TRESHOLD :
+            return i
+    return -1
+
+def regFace(faceDet):
+    print("Add face", faceDet)
+    FACES_DB.append(faceDet)
+    return len(FACES_DB) - 1
+
+face_align = None
+face_net = None
+
+
+def process_image(img_origin_size, idx):
+    # img_origin_size = cv2.imread("two_person.png")
+    # img_origin_size = image = scipy.misc.imread("image.png")
+    print "Process {}".format(idx)
+
+    img_origin_size = resize(img_origin_size, (MAX_IMAGE_SIZE, MAX_IMAGE_SIZE))
+    if FLIP:
+        img_origin_size = cv2.flip(img_origin_size, -1)
+    img_origin = resize(img_origin_size, (SSD_SHAPE_SIZE, SSD_SHAPE_SIZE))
+    cache_img = CACHE_FOLDER + "cache.jpg"
+    person_out_name = CACHE_FOLDER + "cache_person_" + str(idx)
+    person_deepcut_out_name = person_out_name + "_cut.json"
+
+    cv2.imwrite(cache_img, img_origin)
+
+    start = time.clock()
+
+    dets = detector.im_detect([cache_img], None, None, show_timer=True)
+    dets = dets[0]
+
+    last_pt1 = None
+    last_pt2 = None
+    last_cl = None
+
+    persons = []
+    for det in dets:
+        pt1, pt2, cl = extract_rect(det, img_origin_size.shape[1], img_origin_size.shape[0])
+        if cl is None or \
+                (last_pt1 == pt1 and last_pt2 == pt2 and last_cl == cl):
+            continue
+        if cl != "person":
+            continue
+        print pt1, pt2, cl
+        last_pt1 = pt1
+        last_pt2 = pt2
+        last_cl = cl
+        # TODO: path only people squeare
+
+        pose_start = time.clock()
+        # crop person
+        person_image = img_origin_size[pt1[1]:pt2[1], pt1[0]:pt2[0]]  # cv2.resize(img_origin_size, (224, 224))
+        image_copy = person_image.copy()
+        if person_image.ndim == 2:
+            person_image = np.dstack((person_image, person_image, person_image))
+        else:
+            person_image = person_image[:, :, ::-1]
+
+        pose = estimate_pose(person_image, model_def, model_bin, [1.])
+        print("pose : ", (time.clock() - pose_start))
+
+        face_start = time.clock()
+        # image_face = face_rect(image, pose)
+        image_face = resize(image_copy, (SSD_SHAPE_SIZE, SSD_SHAPE_SIZE))
+        reps, bb = classifier_webcam.getRep(image_face, args, face_align, face_net)
+        face_id = -1
+        if len(reps) > 0:
+            face_id = findFace(reps[0])
+            if face_id == -1:
+                face_id = regFace(reps[0])
+
+        print("face (", face_id, " : ", (time.clock() - face_start))
+        print("img_preprocessing : ", (time.clock() - start))
+
+        start = time.clock()
+
+        if args.visualize:
+            visim = person_image
+            colors = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [0, 245, 255], [255, 131, 250], [255, 255, 0],
+                      [255, 0, 0], [0, 255, 0], [0, 0, 255], [0, 245, 255], [255, 131, 250], [255, 255, 0],
+                      [0, 0, 0], [255, 255, 255]]
+            try:
+                for p_idx in range(14):
+                    _npcircle(visim,
+                              pose[0, p_idx],
+                              pose[1, p_idx],
+                              4,
+                              colors[p_idx],
+                              0.0)
+                vis_name = person_out_name + '_vis.jpg'
+                # cv2.imwrite(vis_name, visim)
+            except Exception:
+                print "Ignore"
+
+            cv2.rectangle(img_origin_size, pt1, pt2, (255, 0, 0))
+
+        persons.append({'person_id': face_id, 'poseCoordinats': pose.tolist(), 'activity': 'standing'})
+        print("visualize : ", (time.clock() - start))
+
+    if len(persons) > 0:
+        cv2.imwrite(person_out_name + ".jpg", img_origin_size)
+        with open(person_deepcut_out_name, 'wb') as outfile:
+            json.dump({'persons': persons}, outfile)
 
 
 if __name__ == '__main__':
@@ -250,123 +396,43 @@ if __name__ == '__main__':
     model_bin = 'deepcut-cnn/models/deepercut/ResNet-152.caffemodel'
     scales = '1.'
 
-    align = openface.AlignDlib("openface/models/dlib/shape_predictor_68_face_landmarks.dat")
-    net = openface.TorchNeuralNet(
+    face_align = openface.AlignDlib("openface/models/dlib/shape_predictor_68_face_landmarks.dat")
+    face_net = openface.TorchNeuralNet(
         "openface/models/openface/nn4.small2.v1.t7",
         imgDim=args.imgDim,
         cuda=False)
 
     cap = cv2.VideoCapture("test2.mp4")
+    FLIP = True
+    # cap = cv2.VideoCapture(0)
     idx = 0
 
     shutil.rmtree(CACHE_FOLDER)
     os.mkdir(CACHE_FOLDER)
     print("Loaded")
+
+    stream = Subject()
+    # stream.buffer_with_count(10)\
+    #     .observe_on(Scheduler.new_thread)\
+    #     .flat_map(lambda list : Observable.from_(list))\
+    #     .subscribe(lambda x : process_image(x[0], x[1]))
+    stream.filter(lambda x : x[1] % SKIP_RATE == 0)\
+        .subscribe(lambda x: process_image(x[0], x[1]))
+
+    idx = 0
     while (True):
         ret, img_origin_size = cap.read()
-        # img_origin_size = cv2.imread("two_person.png")
-        # img_origin_size = image = scipy.misc.imread("image.png")
-        ret= True
-        print("Video read, ", ret)
-        if(img_origin_size is None):
+        ret = True
+        # print("Video read, ", ret)
+        if (img_origin_size is None):
             print "Unable to read image"
             break
 
-        img_origin_size = resize(img_origin_size, (MAX_IMAGE_SIZE, MAX_IMAGE_SIZE))
-        img_origin_size = cv2.flip(img_origin_size, -1)
-        img_origin = resize(img_origin_size, (SSD_SHAPE_SIZE, SSD_SHAPE_SIZE))
-        cache_img = CACHE_FOLDER + "cache.jpg"
-        person_out_name = CACHE_FOLDER + "cache_person_" + str(idx)
-        person_deepcut_out_name = person_out_name + "_cut.json"
-
-        cv2.imwrite(cache_img, img_origin)
-
-
-        start = time.clock()
-
-        dets = detector.im_detect([cache_img], None, None, show_timer=True)
-        dets = dets[0]
-
-        last_pt1 = None
-        last_pt2 = None
-        last_cl = None
-
-        persons = []
-        person_id = 0;
-        for det in dets:
-            pt1, pt2, cl = extract_rect(det, img_origin_size.shape[1], img_origin_size.shape[0])
-            if cl is None or \
-                    (last_pt1 == pt1 and last_pt2 == pt2 and last_cl == cl):
-                continue
-            if cl != "person" :
-                continue
-            person_id += 1
-            print pt1, pt2, cl
-            last_pt1 = pt1
-            last_pt2 = pt2
-            last_cl = cl
-            #TODO: path only people squeare
-
-            pose_start = time.clock()
-            #crop person
-            image = img_origin_size[pt1[1]:pt2[1], pt1[0]:pt2[0]]#cv2.resize(img_origin_size, (224, 224))
-            if image.ndim == 2:
-                image = np.dstack((image, image, image))
-            else:
-                image = image[:, :, ::-1]
-
-            pose = estimate_pose(image, model_def, model_bin, [1.])
-            print("pose : ", (time.clock() - pose_start))
-
-            face_start = time.clock()
-            image_face = facecrop(image, pose)
-            reps, bb = classifier_webcam.getRep(image_face, args, align, net)
-            print reps, bb
-            for box in bb:
-                print box
-
-            print("face : ", (time.clock() - face_start))
-            print("img_preprocessing : ", (time.clock() - start))
-
-            start = time.clock()
-
-            if args.visualize:
-                visim = image
-                colors = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [0, 245, 255], [255, 131, 250], [255, 255, 0],
-                          [255, 0, 0], [0, 255, 0], [0, 0, 255], [0, 245, 255], [255, 131, 250], [255, 255, 0],
-                          [0, 0, 0], [255, 255, 255]]
-                try :
-                    for p_idx in range(14):
-                        _npcircle(visim,
-                                  pose[0, p_idx],
-                                  pose[1, p_idx],
-                                  4,
-                                  colors[p_idx],
-                                  0.0)
-                    vis_name = person_out_name + '_vis.jpg'
-                    # cv2.imwrite(vis_name, visim)
-                except Exception:
-                    print "Ignore"
-
-                cv2.rectangle(img_origin_size, pt1, pt2, (255, 0, 0))
-
-            persons.append({'person_id':person_id, 'poseCoordinats':pose.tolist()})
-
-            cv2.imwrite(person_out_name + ".jpg", img_origin_size)
-
-            print("visualize : ", (time.clock() - start))
-
-        with open(person_deepcut_out_name, 'wb') as outfile:
-            json.dump({'persons':persons}, outfile)
-
+        print "Readed {}".format(idx)
+        stream.on_next((img_origin_size, idx))
+        # process_image(img_origin_size, idx)
         idx += 1
-        # time.sleep(1)
-        # Display the resulting frame
-        # cv2.imshow('frame', gray)
-
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
     # When everything done, release the capture
     cap.release()
     cv2.destroyAllWindows()
+
