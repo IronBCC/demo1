@@ -396,6 +396,8 @@ def process_image(img_origin_size, idx):
         cv2.imwrite(person_out_name + ".jpg", img_origin_size)
         with open(person_deepcut_out_name, 'wb') as outfile:
             json.dump({'persons': persons}, outfile)
+        with open(CACHE_FOLDER + "lastFrame.txt", 'w') as outfile:
+            outfile.write(str(idx))
 
 
 if __name__ == '__main__':
