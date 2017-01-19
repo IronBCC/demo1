@@ -210,6 +210,15 @@ RUN git clone http://ironbcc:GfhjkmYf@github.com/maxgoncharov/cherrylab-demobot.
     npm install forever forever-monitor -g && \
     npm install forever-monitor
 
+######
+# Additinal setup
+######
+
+WORKDIR /root/torch
+
+ENV TORCH_LUA_VERSION LUA52
+RUN pip install rx && \
+    sh install.sh
 
 #######
 # END

@@ -79,6 +79,7 @@ CLASSES = ('aeroplane', 'bicycle', 'bird', 'boat',
 MAX_IMAGE_SIZE = 700
 SSD_SHAPE_SIZE = 300
 SKIP_RATE = 12
+CLEAR_RATE = SKIP_RATE * 60
 
 
 def get_detector(net, prefix, epoch, data_shape, mean_pixels, ctx,
@@ -239,13 +240,13 @@ def resize(img, size):
     size = (min(size[0], img.shape[0]), min(size[1], img.shape[1]))
     r = img.shape[0] / float(img.shape[1])
     size = (size[0], int(size[0] * r))
-    return cv2.resize(img, size)
+    return cv2.resize(img, size), r
 
 def face_rect(img, pose):
     face = ((pose[0, 13], pose[1, 13]), (pose[0, 12], pose[1, 12]))
     dt = face[1][1] - face[0][1]
-    # return ((face[0][1], face[0][0] - dt), (face[1][1] + dt, face[1][0] + dt))
-    return img[face[0][0] - dt:face[1][0] + dt, face[0][1]:face[1][1] + dt]
+    return ((int(face[0][1]), int(face[0][0] - dt)), (int(face[1][1] + dt), int(face[1][0] + dt)))
+    # return img[face[0][0] - dt:face[1][0] + dt, face[0][1]:face[1][1] + dt]
     # return resize(img, (SSD_SHAPE_SIZE, SSD_SHAPE_SIZE))
 
 def pose_to_global(pose, person):
@@ -266,6 +267,14 @@ FACES_DB = []
 FACE_TRESHOLD = 0.8
 
 FLIP = False
+
+def clearCacheFolder():
+    print "Clear folder"
+    expired_time = time.time() * 1000 - 120 * 1000
+    for f in os.listdir(CACHE_FOLDER):
+        file = os.path.join(CACHE_FOLDER, f)
+        if os.stat(file).st_mtime < expired_time:
+            os.remove(file)
 
 def findFace(faceDet):
     for i in range(len(FACES_DB)):
@@ -293,15 +302,16 @@ def process_image(img_origin_size, idx):
     # img_origin_size = image = scipy.misc.imread("image.png")
     print "Process {}".format(idx)
 
-    img_origin_size = resize(img_origin_size, (MAX_IMAGE_SIZE, MAX_IMAGE_SIZE))
+    img_origin_size, r = resize(img_origin_size, (MAX_IMAGE_SIZE, MAX_IMAGE_SIZE))
     if FLIP:
         img_origin_size = cv2.flip(img_origin_size, -1)
-    img_origin = resize(img_origin_size, (SSD_SHAPE_SIZE, SSD_SHAPE_SIZE))
+    img_origin, r = resize(img_origin_size, (SSD_SHAPE_SIZE, SSD_SHAPE_SIZE))
     cache_img = CACHE_FOLDER + "cache.jpg"
     person_out_name = CACHE_FOLDER + "cache_person_" + str(idx)
     person_deepcut_out_name = person_out_name + "_cut.json"
 
     cv2.imwrite(cache_img, img_origin)
+    cv2.imwrite(person_out_name + "_origin.jpg", img_origin_size)
 
     start = time.clock()
 
@@ -343,12 +353,17 @@ def process_image(img_origin_size, idx):
 
         face_start = time.clock()
         # image_face = face_rect(image, pose)
-        image_face = resize(image_copy, (SSD_SHAPE_SIZE, SSD_SHAPE_SIZE))
+        image_face, r = resize(image_copy, (SSD_SHAPE_SIZE, SSD_SHAPE_SIZE))
         face_rep, face_bb = classifier_webcam.getRep(image_face, args, face_align, face_net)
         face_id = -1
         if len(face_rep) > 0:
             face_rep = face_rep[0]
             face_bb = face_bb[0]
+            face_bb = ((int(face_bb.left() / r * .9), int(face_bb.top() / r * .7)), (int(face_bb.right() / r * 1.1), int(face_bb.bottom() / r * 1.2)))
+            # face_bb = face_rect(None, pose)
+            # min = face_bb[0][1]
+            # min_x = (face_bb.left() - min) / 2
+            # face_bb = ((face_bb[0][0] - min, face_bb - min), (face_bb.right() - min - min_x,face_bb.bottom() - min))
             face_id = findFace(face_rep)
             if face_id == -1:
                 face_id = regFace(face_rep)
@@ -380,6 +395,11 @@ def process_image(img_origin_size, idx):
                 print "Ignore"
 
             cv2.rectangle(img_origin_size, pt1, pt2, (255, 0, 0))
+            if face_bb != None:
+                cv2.rectangle(img_origin_size,
+                              (face_bb[0][0] + pt1[0], face_bb[0][1] + pt1[1]),
+                              (face_bb[1][0] + pt1[0], face_bb[1][1] + pt1[1]),
+                              (255, 255, 0))
 
         persons.append(
             {'person_id': face_id,
@@ -387,17 +407,21 @@ def process_image(img_origin_size, idx):
              'pose_bb' : (pt1, pt2),
              'activity': activity,
              'face_matrix': face_rep.tolist() if face_rep != None else None,
-             'face_bb' : ((face_bb.left(), face_bb.top()), (face_bb.right(),face_bb.bottom())) if face_bb != None else None
+             'face_bb' : face_bb
              })
 
-        print("visualize : ", (time.clock() - start))
+        # print("visualize : ", (time.clock() - start))
 
     if len(persons) > 0:
         cv2.imwrite(person_out_name + ".jpg", img_origin_size)
         with open(person_deepcut_out_name, 'wb') as outfile:
             json.dump({'persons': persons}, outfile)
-        with open(CACHE_FOLDER + "lastFrame.txt", 'w') as outfile:
-            outfile.write(str(idx))
+        with open(CACHE_FOLDER + "lastFrame.json", 'wb') as outfile:
+            json.dump({'frame': idx}, outfile)
+        return True
+
+    return False
+
 
 
 if __name__ == '__main__':
@@ -426,7 +450,7 @@ if __name__ == '__main__':
     face_net = openface.TorchNeuralNet(
         "openface/models/openface/nn4.small2.v1.t7",
         imgDim=args.imgDim,
-        cuda=False)
+        cuda=True)
 
     # img = cv2.imread("pose_5.jpg")
     # process_image(img, 5)
@@ -448,7 +472,9 @@ if __name__ == '__main__':
     #     .flat_map(lambda list : Observable.from_(list))\
     #     .subscribe(lambda x : process_image(x[0], x[1]))
     stream.filter(lambda x : x[1] % SKIP_RATE == 0)\
-        .subscribe(lambda x: process_image(x[0], x[1]))
+        .subscribe(lambda x: \
+                           process_image(x[0], x[1])
+                   )
 
     idx = 0
     while (True):
