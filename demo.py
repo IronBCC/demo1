@@ -282,7 +282,7 @@ def regFace(faceDet):
 
 def increase_rect(pt1, pt2):
     return (int(pt1[0] * 0.95), int(pt1[1] * 0.9)),\
-           (int(math.ceil(pt2[0] * 1.05)), int(math.ceil(pt2[0] * 1.05)))
+           (int(math.ceil(pt2[0] * 1.05)), int(math.ceil(pt2[1] * 1.05)))
 
 face_align = None
 face_net = None
