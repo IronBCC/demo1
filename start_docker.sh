@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-sudo nvidia-docker run -it --device /dev/video0 -v /home/ironbcc/cherry/demo1:/root/demo1 ironbcc/demo1
+sudo nvidia-docker run -it --device /dev/video0 -v /home/ironbcc/cherry/demo1:/root/demo1 ironbcc/demo1:0.0.1
 
 #  -e DISPLAY=$DISPLAY \
 #  --env="QT_X11_NO_MITSHM=1" \

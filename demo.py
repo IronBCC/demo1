@@ -16,6 +16,7 @@ import argparse
 
 import cv2
 import time
+from datetime import datetime
 import glob
 import numpy as np
 
@@ -46,6 +47,7 @@ import scipy
 import activity_detection
 
 from collections import namedtuple
+from threading import Thread
 
 from mxnet.io import DataBatch
 
@@ -77,7 +79,11 @@ CLASSES = ('aeroplane', 'bicycle', 'bird', 'boat',
 MAX_IMAGE_SIZE = 700
 SSD_SHAPE_SIZE = 300
 SKIP_RATE = 12
-CLEAR_RATE = SKIP_RATE * 60
+CLEAR_RATE = 240
+THROTTLING = 500
+THROTTLING_SKIP = 1000
+THROTTLING_DEFAULT_SKIP = 500
+EXPIRE_TIME = 120 * 1000
 
 
 def get_detector(net, prefix, epoch, data_shape, mean_pixels, ctx,
@@ -151,6 +157,8 @@ def parse_args():
                         help='show detection time')
     parser.add_argument('--imgDim', dest='imgDim', type=int, default=96,
                         help='show detection time')
+    parser.add_argument('--output_dir', dest='output_dir', type=str, default="./",
+                        help='output base dir')
     parser.add_argument('--threshold', type=float, default=0.5)
     args = parser.parse_args()
     return args
@@ -268,7 +276,7 @@ FLIP = False
 
 def clearCacheFolder():
     print "Clear folder"
-    expired_time = time.time() * 1000 - 120 * 1000
+    expired_time = time.time() * 1000 - EXPIRE_TIME
     for f in os.listdir(CACHE_FOLDER):
         file = os.path.join(CACHE_FOLDER, f)
         if os.stat(file).st_mtime < expired_time:
@@ -410,16 +418,27 @@ def process_image(img_origin_size, idx):
 
         # print("visualize : ", (time.clock() - start))
 
+    with open(CACHE_FOLDER + "lastFrame.json", 'wb') as outfile:
+        json.dump({'frame': idx}, outfile)
     if len(persons) > 0:
         cv2.imwrite(person_out_name + ".jpg", img_origin_size)
         with open(person_deepcut_out_name, 'wb') as outfile:
             json.dump({'persons': persons}, outfile)
-        with open(CACHE_FOLDER + "lastFrame.json", 'wb') as outfile:
-            json.dump({'frame': idx}, outfile)
         return True
 
     return False
 
+running = True
+last_frame = None
+def threaded_function(args):
+    global running
+    global last_frame
+    cap = args
+    while(running):
+        last_frame = cap.grab()
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            print "Stopping..."
+            running = False
 
 
 if __name__ == '__main__':
@@ -444,6 +463,8 @@ if __name__ == '__main__':
     model_bin = '../deepcut-cnn/models/deepercut/ResNet-152.caffemodel'
     scales = '1.'
 
+    CACHE_FOLDER = args.output_dir + CACHE_FOLDER
+
     face_align = openface.AlignDlib("../openface/models/dlib/shape_predictor_68_face_landmarks.dat")
     face_net = openface.TorchNeuralNet(
         "../openface/models/openface/nn4.small2.v1.t7",
@@ -455,38 +476,62 @@ if __name__ == '__main__':
 #
 #
 # def blabla():
-    cap = cv2.VideoCapture("test2.mp4")
-    FLIP = True
-    # cap = cv2.VideoCapture(0)
+#     cap = cv2.VideoCapture("test2.mp4")
+#     FLIP = True
+    cap = cv2.VideoCapture(0)
     idx = 0
 
-    shutil.rmtree(CACHE_FOLDER)
+    try:
+        shutil.rmtree(CACHE_FOLDER)
+    except Exception:
+        print Exception
+        #ignor
+
     os.mkdir(CACHE_FOLDER)
     print("Loaded")
 
-    stream = Subject()
+    # stream = Subject()
     # stream.buffer_with_count(10)\
     #     .observe_on(Scheduler.new_thread)\
     #     .flat_map(lambda list : Observable.from_(list))\
     #     .subscribe(lambda x : process_image(x[0], x[1]))
-    stream.filter(lambda x : x[1] % SKIP_RATE == 0)\
-        .subscribe(lambda x: \
-                           process_image(x[0], x[1])
-                   )
+    # stream.filter(lambda x : x[1] % SKIP_RATE == 0)\
+    #     .subscribe(lambda x: \
+    #                        process_image(x[0], x[1])
+    #                )
 
-    idx = 0
-    while (True):
-        ret, img_origin_size = cap.read()
+    thread = Thread(target = threaded_function, args = (cap,))
+    thread.start()
+
+    idx = 1
+    while (running):
+        if last_frame == None:
+            continue
+        ret, img_origin_size = cap.retrieve(last_frame)
         ret = True
         # print("Video read, ", ret)
         if (img_origin_size is None):
             print "Unable to read image"
+            running = False
             break
 
+        sleep = THROTTLING_DEFAULT_SKIP
+        # if idx % SKIP_RATE == 0:
+        start = time.time() * 1000
+        process_image(img_origin_size, idx)
+        spend = time.time() * 1000 - start
+        if (spend < THROTTLING):
+            print "Throttling..."
+            sleep += THROTTLING_SKIP
+
+        if idx % CLEAR_RATE == 0:
+            clearCacheFolder()
+
+        time.sleep(sleep / 1000.)
         # print "Readed {}".format(idx)
-        stream.on_next((img_origin_size, idx))
-        # process_image(img_origin_size, idx)
         idx += 1
+
+    thread.join()
     # When everything done, release the capture
     cap.release()
     cv2.destroyAllWindows()

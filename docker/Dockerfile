@@ -208,7 +208,8 @@ RUN apt-get update && apt-get install -y zip && \
 RUN git clone http://ironbcc:GfhjkmYf@github.com/maxgoncharov/cherrylab-demobot.git && \
     npm install body-parser config express request && \
     npm install forever forever-monitor -g && \
-    npm install forever-monitor
+    npm install forever-monitor lwip jimp jsonfile && \
+    apt install nano
 
 ######
 # Additinal setup
@@ -216,10 +217,12 @@ RUN git clone http://ironbcc:GfhjkmYf@github.com/maxgoncharov/cherrylab-demobot.
 
 WORKDIR /root/torch
 
-ENV TORCH_LUA_VERSION LUA52
 RUN pip install rx && \
     sh install.sh
 
+RUN mv /root/deepcut-cnn/python/caffe /root/deepcut-cnn/python/caffe__
+
+WORKDIR /root
 #######
 # END
 #######
