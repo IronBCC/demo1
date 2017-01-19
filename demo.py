@@ -8,11 +8,9 @@ import os, sys, inspect
 def import_module(path):
     sys.path.insert(0, path)
 
-import_module("deepcut-cnn/python")
-import_module("deepcut-cnn/python/pose")
-import_module("mxnet_ssd")
-import_module("openface")
-import_module("openface/demos")
+import_module("../deepcut-cnn/python")
+import_module("../deepcut-cnn/python/pose")
+import_module("../mxnet-ssd")
 
 import argparse
 
@@ -29,7 +27,7 @@ from estimate_pose import estimate_pose
 import mxnet as mx
 import caffe
 
-import classifier_webcam
+import eval_openface
 import openface
 
 import os
@@ -104,7 +102,7 @@ def get_detector(net, prefix, epoch, data_shape, mean_pixels, ctx,
     force_nms : bool
         force suppress different categories
     """
-    import_module("mxnet_ssd/symbol")
+    import_module("../mxnet-ssd/symbol")
     net = importlib.import_module("symbol_" + net) \
         .get_symbol(len(CLASSES), nms_thresh, force_nms)
     detector = Detector(net, prefix + "_" + str(data_shape), epoch, \
@@ -124,7 +122,7 @@ def parse_args():
     parser.add_argument('--epoch', dest='epoch', help='epoch of trained model',
                         default=0, type=int)
     parser.add_argument('--prefix', dest='prefix', help='trained model prefix',
-                        default=os.path.join(os.getcwd(), 'mxnet_ssd/model', 'ssd'), type=str)
+                        default=os.path.join(os.getcwd(), '../mxnet-ssd/model', 'ssd'), type=str)
     parser.add_argument('--cpu', dest='cpu', help='(override GPU) use CPU to detect',
                         action='store_true', default=False)
     parser.add_argument('--gpu', dest='gpu_id', type=int, default=0,
@@ -149,7 +147,7 @@ def parse_args():
                         help='show detection time')
     parser.add_argument('--verbose', dest='verbose', type=bool, default=False,
                         help='show detection time')
-    parser.add_argument('--classifierModel', dest='classifierModel', type=str, default="openface/models/openface/celeb-classifier.nn4.small2.v1.pkl",
+    parser.add_argument('--classifierModel', dest='classifierModel', type=str, default="../openface/models/openface/celeb-classifier.nn4.small2.v1.pkl",
                         help='show detection time')
     parser.add_argument('--imgDim', dest='imgDim', type=int, default=96,
                         help='show detection time')
@@ -254,7 +252,7 @@ def pose_to_global(pose, person):
 
 def eval_face(img, face_bb):
     start = time.clock()
-    alignedFace = align.align(args.imgDim, img, face_bb, landmarkIndices=openface.AlignDlib.OUTER_EYES_AND_NOSE)
+    alignedFace = align.align(args.imgDim, img, face_bb, landmarkIndices=eval_openface.AlignDlib.OUTER_EYES_AND_NOSE)
 
     if alignedFace is None:
         raise Exception("Unable to align the frame")
@@ -354,7 +352,7 @@ def process_image(img_origin_size, idx):
         face_start = time.clock()
         # image_face = face_rect(image, pose)
         image_face, r = resize(image_copy, (SSD_SHAPE_SIZE, SSD_SHAPE_SIZE))
-        face_rep, face_bb = classifier_webcam.getRep(image_face, args, face_align, face_net)
+        face_rep, face_bb = eval_openface.getRep(image_face, args, face_align, face_net)
         face_id = -1
         if len(face_rep) > 0:
             face_rep = face_rep[0]
@@ -442,13 +440,13 @@ if __name__ == '__main__':
                             ctx, args.nms_thresh, args.force_nms)
 
     #deepcut settings
-    model_def = 'deepcut-cnn/models/deepercut/ResNet-152.prototxt'
-    model_bin = 'deepcut-cnn/models/deepercut/ResNet-152.caffemodel'
+    model_def = '../deepcut-cnn/models/deepercut/ResNet-152.prototxt'
+    model_bin = '../deepcut-cnn/models/deepercut/ResNet-152.caffemodel'
     scales = '1.'
 
-    face_align = openface.AlignDlib("openface/models/dlib/shape_predictor_68_face_landmarks.dat")
+    face_align = openface.AlignDlib("../openface/models/dlib/shape_predictor_68_face_landmarks.dat")
     face_net = openface.TorchNeuralNet(
-        "openface/models/openface/nn4.small2.v1.t7",
+        "../openface/models/openface/nn4.small2.v1.t7",
         imgDim=args.imgDim,
         cuda=True)
 
