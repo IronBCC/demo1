@@ -160,6 +160,8 @@ def parse_args():
     parser.add_argument('--output_dir', dest='output_dir', type=str, default="./",
                         help='output base dir')
     parser.add_argument('--threshold', type=float, default=0.5)
+    parser.add_argument('--type', type=str, default="camera", help="can be : camera, video, image")
+    parser.add_argument('--src', type=str, default="", help="source file for video or image")
     args = parser.parse_args()
     return args
 
@@ -440,13 +442,22 @@ def threaded_function(args):
             print "Stopping..."
             running = False
 
-def blabla():
-    cap = cv2.VideoCapture("test2.mp4")
+def grab_video(file):
+    cap = cv2.VideoCapture(file)
     FLIP = True
+    idx = 0
+    while (True):
+        ret, img_origin_size = cap.read()
+        # print("Video read, ", ret)
+        if (img_origin_size is None):
+            print "Unable to read image"
+            break
+        process_image(img_origin_size, idx)
+        idx += 1
 
-def grab_image():
-    img = cv2.imread("pose_10.jpg")
-    process_image(img, 10)
+def grab_image(file):
+    img = cv2.imread(file)
+    process_image(img, 0)
 
 def grab_camera():
     global running
@@ -481,7 +492,6 @@ def grab_camera():
             if last_frame == None:
                 continue
             ret, img_origin_size = cap.retrieve(last_frame)
-            ret = True
             # print("Video read, ", ret)
             if (img_origin_size is None):
                 print "Unable to read image"
@@ -544,4 +554,9 @@ if __name__ == '__main__':
         imgDim=args.imgDim,
         cuda=True)
 
-    grab_image()
+    if "image" == args.type:
+        grab_image(args.src)
+    elif "video" == args.type:
+        grab_video(args.src)
+    else:
+        grab_camera()

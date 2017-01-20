@@ -227,4 +227,5 @@ WORKDIR /root
 # END
 #######
 EXPOSE 8000 9000 8888 8080
-CMD /bin/bash
+CMD /bin/bash && \
+    sh demo1/setup.sh
