@@ -440,6 +440,79 @@ def threaded_function(args):
             print "Stopping..."
             running = False
 
+def blabla():
+    cap = cv2.VideoCapture("test2.mp4")
+    FLIP = True
+
+def grab_image():
+    img = cv2.imread("pose_10.jpg")
+    process_image(img, 10)
+
+def grab_camera():
+    global running
+    cap = cv2.VideoCapture(0)
+    idx = 0
+
+    try:
+        shutil.rmtree(CACHE_FOLDER)
+    except Exception:
+        print Exception
+        #ignor
+
+    os.mkdir(CACHE_FOLDER)
+    print("Loaded")
+
+    # stream = Subject()
+    # stream.buffer_with_count(10)\
+    #     .observe_on(Scheduler.new_thread)\
+    #     .flat_map(lambda list : Observable.from_(list))\
+    #     .subscribe(lambda x : process_image(x[0], x[1]))
+    # stream.filter(lambda x : x[1] % SKIP_RATE == 0)\
+    #     .subscribe(lambda x: \
+    #                        process_image(x[0], x[1])
+    #                )
+
+    thread = Thread(target = threaded_function, args = (cap,))
+    thread.start()
+
+    idx = 0
+    try:
+        while (running):
+            if last_frame == None:
+                continue
+            ret, img_origin_size = cap.retrieve(last_frame)
+            ret = True
+            # print("Video read, ", ret)
+            if (img_origin_size is None):
+                print "Unable to read image"
+                running = False
+                break
+
+            sleep = THROTTLING_DEFAULT_SKIP
+            # if idx % SKIP_RATE == 0:
+            start = time.time() * 1000
+            process_image(img_origin_size, idx)
+            spend = time.time() * 1000 - start
+            if (spend < THROTTLING):
+                print "Throttling..."
+                sleep += THROTTLING_SKIP
+
+            if idx >= CLEAR_RATE:
+                idx = 0
+            # if idx % CLEAR_RATE == 0:
+            #     clearCacheFolder()
+
+            time.sleep(sleep / 1000.)
+            # print "Readed {}".format(idx)
+            idx += 1
+    except Exception:
+        running = False
+
+    thread.join()
+    # When everything done, release the capture
+    cap.release()
+    cv2.destroyAllWindows()
+
 
 if __name__ == '__main__':
     args = parse_args()
@@ -471,68 +544,4 @@ if __name__ == '__main__':
         imgDim=args.imgDim,
         cuda=True)
 
-    # img = cv2.imread("pose_5.jpg")
-    # process_image(img, 5)
-#
-#
-# def blabla():
-#     cap = cv2.VideoCapture("test2.mp4")
-#     FLIP = True
-    cap = cv2.VideoCapture(0)
-    idx = 0
-
-    try:
-        shutil.rmtree(CACHE_FOLDER)
-    except Exception:
-        print Exception
-        #ignor
-
-    os.mkdir(CACHE_FOLDER)
-    print("Loaded")
-
-    # stream = Subject()
-    # stream.buffer_with_count(10)\
-    #     .observe_on(Scheduler.new_thread)\
-    #     .flat_map(lambda list : Observable.from_(list))\
-    #     .subscribe(lambda x : process_image(x[0], x[1]))
-    # stream.filter(lambda x : x[1] % SKIP_RATE == 0)\
-    #     .subscribe(lambda x: \
-    #                        process_image(x[0], x[1])
-    #                )
-
-    thread = Thread(target = threaded_function, args = (cap,))
-    thread.start()
-
-    idx = 1
-    while (running):
-        if last_frame == None:
-            continue
-        ret, img_origin_size = cap.retrieve(last_frame)
-        ret = True
-        # print("Video read, ", ret)
-        if (img_origin_size is None):
-            print "Unable to read image"
-            running = False
-            break
-
-        sleep = THROTTLING_DEFAULT_SKIP
-        # if idx % SKIP_RATE == 0:
-        start = time.time() * 1000
-        process_image(img_origin_size, idx)
-        spend = time.time() * 1000 - start
-        if (spend < THROTTLING):
-            print "Throttling..."
-            sleep += THROTTLING_SKIP
-
-        if idx % CLEAR_RATE == 0:
-            clearCacheFolder()
-
-        time.sleep(sleep / 1000.)
-        # print "Readed {}".format(idx)
-        idx += 1
-
-    thread.join()
-    # When everything done, release the capture
-    cap.release()
-    cv2.destroyAllWindows()
-
+    grab_image()
